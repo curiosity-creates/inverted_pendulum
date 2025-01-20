@@ -6,89 +6,9 @@ import numpy as np
 from itertools import count
 import torch.optim as optim
 import matplotlib.pyplot as plt
+from gym_inverted_pendulum import FCQ
+from gym_inverted_pendulum import ReplayBuffer
 
-
-class FCQ(nn.Module):                               # Fully connected with at least 2 hidden layers to output Q values for actions based on the state
-    def __init__(self, input_dim, output_dim, hidden_dim = (32,32), activation_function = F.relu):
-        super(FCQ, self).__init__()
-
-        self.activation_function = activation_function
-        self.input_layer = nn.Linear(input_dim, hidden_dim[0])
-        self.hidden_layers = nn.ModuleList()
-
-        for i in range(len(hidden_dim)-1):
-            hidden_layer = nn.Linear(hidden_dim[i], hidden_dim[i+1])
-            self.hidden_layers.append(hidden_layer)
-
-
-        self.output_layer = nn.Linear(hidden_dim[-1], output_dim)
-
-        if torch.cuda.is_available():               # Use GPU if available
-            device = "cuda"
-        else:
-            device = "cpu"
-
-        self.device = torch.device(device)
-        self.to(self.device)
-
-    def forward(self, state):                       # Forward pass through the network. state needs to be a tensor.
-
-        x = self.activation_function(self.input_layer(state))
-
-        for hidden_layer in self.hidden_layers:
-            x = self.activation_function(hidden_layer(x))
-
-        x = self.output_layer(x)
-        
-        return x
-
-class ReplayBuffer():                               # Replay buffer which stores experiences
-    def __init__(self, max_size = 50000, batch_size = 64):
-
-        self.max_size = max_size
-        self.batch_size = batch_size
-
-        self.states = np.empty(shape=(max_size), dtype=np.ndarray)
-        self.actions = np.empty(shape=(max_size), dtype=np.ndarray)
-        self.next_states = np.empty(shape=(max_size), dtype=np.ndarray)
-        self.rewards = np.empty(shape=(max_size), dtype=np.ndarray)
-        self.terminals = np.empty(shape=(max_size), dtype=np.ndarray)
-
-        self.idx = 0
-        self.size = 0
-
-    def store(self, experience):                    # Function called after every experience to store it in the replay buffer
-        s, a, r, next_s, terminal = experience      # experience contains state, action taken, reward received, next state and if the next state is terminal or not
-
-        self.states[self.idx] = s
-        self.actions[self.idx] = a
-        self.rewards[self.idx] = r
-        self.next_states[self.idx] = next_s
-        self.terminals[self.idx] = terminal
-
-        self.idx += 1
-        self.idx = self.idx % self.max_size         # The idx goes back to zero and starts overwriting old experiences when the number of experiences is higher than max_size
-
-        self.size += 1
-
-        self.size = min(self.size, self.max_size)
-
-    def draw_samples(self, batch_size = None):      # This function draws experiences from the replay buffer
-
-        if batch_size == None:
-            batch_size = self.batch_size
-
-        idxs = np.random.choice(self.size, batch_size, replace=False)
-        experiences = np.vstack(self.states[idxs]), \
-                        np.vstack(self.actions[idxs]), \
-                        np.vstack(self.rewards[idxs]), \
-                        np.vstack(self.next_states[idxs]), \
-                        np.vstack(self.terminals[idxs])
-        
-        return experiences                          # experiences returned as a numpy array
-
-    def __len__(self):
-        return self.size
 
 class DQN():                                        # Reinforcement learning agent
     def __init__(self, env, replay_buffer, online_model, target_model, optimizer, warmup_batches, update_freq, epochs = 40, gamma = 1, demo_env=None):
@@ -201,75 +121,76 @@ class DQN():                                        # Reinforcement learning age
         
         return final_demo_score
             
+if __name__ == "__main__":
+    env = gym.make('CartPole-v1', render_mode = "rgb_array")
 
-env = gym.make('CartPole-v1', render_mode = "rgb_array")
+    epochs = 40
+    episodes = 2000
+    max_steps = 1000
 
-epochs = 40
-episodes = 2000
-max_steps = 1000
+    learning_rate = 0.0005
+    batch_size = 256
+    warmup_batches = 5
+    update_freq = 50                                        # Number signifies episodes after which target network will be updated
+    min_steps_to_learn = warmup_batches * batch_size
 
-learning_rate = 0.0005
-batch_size = 64
-warmup_batches = 5
-update_freq = 10                                        # Number signifies episodes after which target network will be updated
-min_steps_to_learn = warmup_batches * batch_size
+    replay_buffer = ReplayBuffer(batch_size=batch_size)
+    online_model = FCQ(env.observation_space.shape[0], env.action_space.n, (1024,128))
+    target_model = FCQ(env.observation_space.shape[0], env.action_space.n, (1024,128))
+    optimizer = optim.RMSprop(online_model.parameters(), lr=learning_rate)
 
-replay_buffer = ReplayBuffer(batch_size=batch_size)
-online_model = FCQ(env.observation_space.shape[0], env.action_space.n, (512,128))
-target_model = FCQ(env.observation_space.shape[0], env.action_space.n, (512,128))
-optimizer = optim.RMSprop(online_model.parameters(), lr=learning_rate)
+    agent = DQN(env, replay_buffer, online_model, target_model, optimizer, warmup_batches, update_freq, epochs=epochs)
+    agent.soft_update_weights()
+    episode_scores = []
+    eval_scores = []
+    decay_steps = episodes * 0.8
+    eval = True
 
-agent = DQN(env, replay_buffer, online_model, target_model, optimizer, warmup_batches, update_freq, epochs=epochs)
-agent.soft_update_weights()
-episode_scores = []
-eval_scores = []
-decay_steps = 2000
-eval = True
+    for e in range(episodes+1):
+        state, _ = env.reset()
+        episode_score = 0
+        eps = max(1-e/decay_steps, 0.05)
 
-for e in range(episodes+1):
-    state, _ = env.reset()
-    episode_score = 0
-    eps = max(1-e/decay_steps, 0.05)
+        for step in count():
+            state, reward, terminated, truncated, _ = agent.interaction_step(state, eps)
+            episode_score += reward                             # Score with epsilon greedy action selection (with exploration)
 
-    for step in count():
-        state, reward, terminated, truncated, _ = agent.interaction_step(state, eps)
-        episode_score += reward                             # Score with epsilon greedy action selection (with exploration)
+            if terminated or truncated or step > max_steps:
+                if len(agent.replay_buffer) > min_steps_to_learn:
+                    # for _ in range(epochs):
+                    agent.learn()
+                if e % update_freq == 0 and step > 1:
+                    agent.soft_update_weights()
+                break
+        
+        episode_scores.append(episode_score)
+        
+        if eval:
+            eval_score = agent.demo(render=False)               # Eval score is calculated using agent.demo which uses greedy action selection
+            eval_scores.append(eval_score)
 
-        if terminated or truncated or step > max_steps:
-            if len(agent.replay_buffer) > min_steps_to_learn:
-                agent.learn()
-            if e % update_freq == 0 and step > 1:
-                agent.soft_update_weights()
+        if e % 50 == 0 and e > 1:
+            print("Episode: {}/{}, Rolling mean: {}, Mean: {}, Epsilon value: {:.2f}".format(e, episodes, int(np.mean(episode_scores[-50:])), int(np.mean(episode_scores)), eps))
+
+        if np.mean(eval_scores[-50:]) > 300:
+            print("Episode: {}/{}, Rolling mean: {}, Mean: {}, Epsilon value: {:.2f}".format(e, episodes, int(np.mean(episode_scores[-50:])), int(np.mean(episode_scores)), eps))
+            print("Eval score for the last 50 episodes: ", np.mean(eval_scores[-50:]))
+            print("Cartpole solved!")
             break
-    
-    episode_scores.append(episode_score)
-    
-    if eval:
-        eval_score = agent.demo(render=False)               # Eval score is calculated using agent.demo which uses greedy action selection
-        eval_scores.append(eval_score)
 
-    if e % 50 == 0 and e > 1:
-        print("Episode: {}/{}, Rolling mean: {}, Mean: {}, Epsilon value: {:.2f}".format(e, episodes, int(np.mean(episode_scores[-50:])), int(np.mean(episode_scores)), eps))
+    agent.env.close()
 
-    if np.mean(eval_scores[-50:]) > 300:
-        print("Episode: {}/{}, Rolling mean: {}, Mean: {}, Epsilon value: {:.2f}".format(e, episodes, int(np.mean(episode_scores[-50:])), int(np.mean(episode_scores)), eps))
-        print("Eval score for the last 50 episodes: ", np.mean(eval_scores[-50:]))
-        print("Cartpole solved!")
-        break
+    # Plotting the eval_scores
+    plt.plot(eval_scores, label="Evaluation score")
+    window_size = 50
+    moving_averages = np.convolve(eval_scores, np.ones(window_size), 'valid') / window_size
+    plt.plot(np.arange(window_size, len(eval_scores) + 1), moving_averages, label="50-Episode Moving Average")
 
-agent.env.close()
+    plt.xlabel("Episode")
+    plt.ylabel("Evaluation Score")
+    plt.title("DQN CartPole-v1 Evaluation Scores")
+    plt.legend()  # Add a legend to the plot
+    plt.show()
 
-# Plotting the eval_scores
-plt.plot(eval_scores, label="Evaluation score")
-window_size = 50
-moving_averages = np.convolve(eval_scores, np.ones(window_size), 'valid') / window_size
-plt.plot(np.arange(window_size, len(eval_scores) + 1), moving_averages, label="50-Episode Moving Average")
-
-plt.xlabel("Episode")
-plt.ylabel("Evaluation Score")
-plt.title("DQN CartPole-v1 Evaluation Scores")
-plt.legend()  # Add a legend to the plot
-plt.show()
-
-print("Final eval score = ", agent.demo(render=True))
-agent.env.close()
+    print("Final eval score = ", agent.demo(render=True))
+    agent.env.close()
