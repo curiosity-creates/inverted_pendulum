@@ -10,9 +10,10 @@ import matplotlib.pyplot as plt
 class FCQ(nn.Module):                                       # Fully connected with at least 2 hidden layers to output Q values for actions based on the state
     def __init__(self, input_dim, output_dim, hidden_dim = (32,32), activation_function = F.relu):
         super(FCQ, self).__init__()
-
+        self.input_dim = input_dim
+        self.output_dim = output_dim
         self.activation_function = activation_function
-        self.input_layer = nn.Linear(input_dim, hidden_dim[0])
+        self.input_layer = nn.Linear(self.input_dim, hidden_dim[0])
         self.hidden_layers = nn.ModuleList()
 
         for i in range(len(hidden_dim)-1):
@@ -20,7 +21,7 @@ class FCQ(nn.Module):                                       # Fully connected wi
             self.hidden_layers.append(hidden_layer)
 
 
-        self.output_layer = nn.Linear(hidden_dim[-1], output_dim)
+        self.output_layer = nn.Linear(hidden_dim[-1], self.output_dim)
 
         if torch.cuda.is_available():                       # Use GPU if available
             device = "cuda"
@@ -198,81 +199,81 @@ class DQN():                                                # Reinforcement lear
         
         return final_demo_score
             
+if __name__ == "__main__":
+    env = gym.make('CartPole-v1', render_mode = "rgb_array")
 
-env = gym.make('CartPole-v1', render_mode = "rgb_array")
+    epochs = 40
+    episodes = 2000
+    max_steps = 1000
 
-epochs = 40
-episodes = 2000
-max_steps = 1000
+    learning_rate = 0.0005
+    batch_size = 256
+    warmup_batches = 5
+    update_freq = 50                                            # Number signifies steps after which target network will be updated
+    min_steps_to_learn = warmup_batches * batch_size
 
-learning_rate = 0.0005
-batch_size = 64
-warmup_batches = 5
-update_freq = 10                                            # Number signifies steps after which target network will be updated
-min_steps_to_learn = warmup_batches * batch_size
+    replay_buffer = ReplayBuffer(batch_size=batch_size)
 
-replay_buffer = ReplayBuffer(batch_size=batch_size)
+    # Create online and target models
+    online_model = FCQ(env.observation_space.shape[0], env.action_space.n, (16,16))
+    target_model = FCQ(env.observation_space.shape[0], env.action_space.n, (16,16))
 
-# Create online and target models
-online_model = FCQ(env.observation_space.shape[0], env.action_space.n, (512,128))
-target_model = FCQ(env.observation_space.shape[0], env.action_space.n, (512,128))
+    optimizer = optim.RMSprop(online_model.parameters(), lr=learning_rate)
 
-optimizer = optim.RMSprop(online_model.parameters(), lr=learning_rate)
+    agent = DQN(env, replay_buffer, online_model, target_model, optimizer, warmup_batches, update_freq, epochs=epochs)
+    agent.soft_update_weights()
+    episode_scores = []
+    eval_scores = []
+    decay_steps = episodes * 0.8
+    eval = True
 
-agent = DQN(env, replay_buffer, online_model, target_model, optimizer, warmup_batches, update_freq, epochs=epochs)
-agent.soft_update_weights()
-episode_scores = []
-eval_scores = []
-decay_steps = 2000
-eval = True
+    for e in range(episodes+1):
+        state, _ = env.reset()
+        episode_score = 0
+        eps = max(1-e/decay_steps, 0.05)
 
-for e in range(episodes+1):
-    state, _ = env.reset()
-    episode_score = 0
-    eps = max(1-e/decay_steps, 0.05)
-
-    for step in count():
-        state, reward, terminated, truncated, _ = agent.interaction_step(state, eps)
-        episode_score += reward                         # Score with epsilon greedy action selection (with exploration)
+        for step in count():
+            state, reward, terminated, truncated, _ = agent.interaction_step(state, eps)
+            episode_score += reward                         # Score with epsilon greedy action selection (with exploration)
 
 
-        if len(agent.replay_buffer) > min_steps_to_learn:
-            agent.learn()
+            if len(agent.replay_buffer) > min_steps_to_learn:
+                agent.learn()
 
-        if step % update_freq == 0 and step > 1:
-            agent.soft_update_weights()
+            if step % update_freq == 0 and step > 1:
+                agent.soft_update_weights()
 
-        if terminated or truncated or step > max_steps:
+            if terminated or truncated or step > max_steps:
+                break
+        
+        episode_scores.append(episode_score)
+        
+        if eval:                                            
+            eval_score = agent.demo(render=False)           # Eval score is calculated using demo which uses greedy action selection
+            eval_scores.append(eval_score)
+
+        if e % 50 == 0 and e > 1:
+            print("Episode: {}/{}, Rolling mean: {}, Mean: {}, Epsilon value: {:.2f}".format(e, episodes, int(np.mean(episode_scores[-50:])), int(np.mean(episode_scores)), eps))
+
+        if np.mean(eval_scores[-50:]) > 300:
+            print("Episode: {}/{}, Rolling mean: {}, Mean: {}, Epsilon value: {:.2f}".format(e, episodes, int(np.mean(episode_scores[-50:])), int(np.mean(episode_scores)), eps))
+            print("Eval score for the last 50 episodes: ", np.mean(eval_scores[-50:]))
+            print("Cartpole solved!")
             break
-    
-    episode_scores.append(episode_score)
-    
-    if eval:                                            
-        eval_score = agent.demo(render=False)           # Eval score is calculated using demo which uses greedy action selection
-        eval_scores.append(eval_score)
 
-    if e % 50 == 0 and e > 1:
-        print("Episode: {}/{}, Rolling mean: {}, Mean: {}, Epsilon value: {:.2f}".format(e, episodes, int(np.mean(episode_scores[-50:])), int(np.mean(episode_scores)), eps))
-
-    if np.mean(eval_scores[-50:]) > 300:
-        print("Episode: {}/{}, Rolling mean: {}, Mean: {}, Epsilon value: {:.2f}".format(e, episodes, int(np.mean(episode_scores[-50:])), int(np.mean(episode_scores)), eps))
-        print("Eval score for the last 50 episodes: ", np.mean(eval_scores[-50:]))
-        print("Cartpole solved!")
-        break
-
-agent.env.close()
+    agent.env.close()
 
 
-plt.plot(eval_scores, label="Evaluation score")
-window_size = 50
-moving_averages = np.convolve(eval_scores, np.ones(window_size), 'valid') / window_size
-plt.plot(np.arange(window_size, len(eval_scores) + 1), moving_averages, label="50-Episode Moving Average")
+    plt.plot(eval_scores, label="Evaluation score")
+    window_size = 50
+    moving_averages = np.convolve(eval_scores, np.ones(window_size), 'valid') / window_size
+    plt.plot(np.arange(window_size, len(eval_scores) + 1), moving_averages, label="50-Episode Moving Average")
 
-plt.xlabel("Episode")
-plt.ylabel("Evaluation Score")
-plt.title("DQN CartPole-v1 Evaluation Scores")
-plt.legend()  # Add a legend to the plot
-plt.show()
+    plt.xlabel("Episode")
+    plt.ylabel("Evaluation Score")
+    plt.title("DQN CartPole-v1 Evaluation Scores")
+    plt.legend()  # Add a legend to the plot
+    plt.show()
 
-print("Final eval score = ", agent.demo(render=True))
-agent.env.close()
+    print("Final eval score = ", agent.demo(render=True))
+    agent.env.close()
