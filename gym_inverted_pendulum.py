@@ -159,6 +159,8 @@ class DQN():                                                # Reinforcement lear
 
         td_error = yj - qsa
         loss = td_error.pow(2).mul(0.5).mean()
+        # criterion = torch.nn.SmoothL1Loss()
+        # loss = criterion(qsa, yj)
         self.optimizer.zero_grad()
         loss.backward()
         self.optimizer.step()
@@ -220,7 +222,7 @@ if __name__ == "__main__":
 
     optimizer = optim.RMSprop(online_model.parameters(), lr=learning_rate)
 
-    agent = DQN(env, replay_buffer, online_model, target_model, optimizer, warmup_batches, update_freq, epochs=epochs)
+    agent = DQN(env, replay_buffer, online_model, target_model, optimizer, warmup_batches, update_freq, epochs=epochs, gamma=0.99)
     agent.soft_update_weights()
     episode_scores = []
     eval_scores = []

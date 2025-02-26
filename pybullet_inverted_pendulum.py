@@ -91,7 +91,7 @@ class pybulletDQN():
         return loss.item()
     
     def eval(self, robotId, max_steps = 500, randomize_val = 0.17, friction = 0.002):
-        reset_joint(robotId, randomize_val= randomize_val, friction=friction)
+        reset_joint_swingup(robotId, randomize_val= randomize_val, friction=friction)
         state = get_state(robotId)
         episode_score = 0
 
@@ -101,16 +101,16 @@ class pybulletDQN():
         for step in count():
             state = get_state(robotId)
             # print(f"State: {state}")
-            if state[2] > 0.7 and state[2] < 5.58:
-                reward = 0
-                terminal = True
-                # print("Terminal due to joint 2")
-            elif state[0] > 3.14 or state[0] < -3.14:
+            # if state[2] > 0.7 and state[2] < 5.58:
+            #     reward = 0
+            #     terminal = True
+            #     # print("Terminal due to joint 2")
+            if state[0] > 3.14 or state[0] < -3.14:
                 reward = -100
                 terminal = True
                 # print("Terminal due to joint 1")
             else:
-                reward = 1
+                reward = math.cos(state[2]) - 0.002 * (state[3]) ** 2 + 0.001 * math.cos(state[0])
 
             if step > max_steps:
                 truncated = True
@@ -143,6 +143,18 @@ def reset_joint(robotId, randomize_val= 0.17, friction = 0.002):
                                 targetVelocity = 0,
                                 force = friction)
     
+
+def reset_joint_swingup(robotId, randomize_val= 0.17, friction = 0.002):
+    randomize1 = np.random.uniform(-randomize_val, randomize_val)              # Randomize the initial joint position. Angle is in radians
+    randomize2 = np.random.uniform(-randomize_val, randomize_val)              # Randomize the initial joint position. Angle is in radians
+    p.resetJointState(bodyUniqueId=robotId, jointIndex=1, targetValue=randomize1)
+    p.resetJointState(bodyUniqueId=robotId, jointIndex=2, targetValue=randomize2)
+    p.setJointMotorControl2(bodyUniqueId=robotId, 
+                                jointIndex=2, 
+                                controlMode=p.VELOCITY_CONTROL,
+                                targetVelocity = 0,
+                                force = friction)
+    
     
 def get_state(robotId):
     deg = 2 * math.pi
@@ -156,31 +168,31 @@ def send_action(robotId, action):
                                 jointIndex=1, 
                                 controlMode=p.VELOCITY_CONTROL,
                                 targetVelocity = -5,
-                                force = 0.05)
+                                force = 0.3)
     elif action == 1:
         p.setJointMotorControl2(bodyUniqueId=robotId, 
                                 jointIndex=1, 
                                 controlMode=p.VELOCITY_CONTROL,
                                 targetVelocity = 5,
-                                force = 0.05)
+                                force = 0.3)
     elif action == -1:
         # print("Action 2")
         p.setJointMotorControl2(bodyUniqueId=robotId, 
                                 jointIndex=1, 
                                 controlMode=p.VELOCITY_CONTROL,
                                 targetVelocity = 0,
-                                force = 0.05)
+                                force = 0.3)
 
 
 
 if __name__ == "__main__":
 
     epochs = 40
-    episodes = 5000
+    episodes = 8000
     max_steps = 500
 
-    learning_rate = 0.001
-    batch_size = 50
+    learning_rate = 0.0005
+    batch_size = 256
     warmup_batches = 5
     update_freq = 10                                            # Number signifies steps after which target network will be updated
     min_steps_to_learn = warmup_batches * batch_size
@@ -189,12 +201,18 @@ if __name__ == "__main__":
 
     num_actions = 2
     num_states = 4
-
-    online_model = FCQ(num_states, num_actions, (256, 128))
-    target_model = FCQ(num_states, num_actions, (256, 128))
+    model_path = os.path.join("saved_models/run24", "model_5000.pth")
+    if os.path.exists(model_path):
+        print("Loading existing model")
+        online_model = torch.load(model_path)
+        target_model = torch.load(model_path)
+    else:
+        print("Creating new model")
+        online_model = FCQ(num_states, num_actions, (256, 128))
+        target_model = FCQ(num_states, num_actions, (256, 128))
     optimizer = optim.RMSprop(online_model.parameters(), lr=learning_rate)
 
-    agent = pybulletDQN(replay_buffer, online_model, target_model, optimizer, update_freq, epochs=epochs)
+    agent = pybulletDQN(replay_buffer, online_model, target_model, optimizer, update_freq, epochs=epochs, gamma=0.99)
     agent.soft_update_weights()
 
     eval = True
@@ -205,7 +223,7 @@ if __name__ == "__main__":
     episode_scores = []
 
     save_intervals = 1000
-    save_dir = "saved_models/run"
+    save_dir = "saved_models/run24"
 
     physicsClient = p.connect(p.GUI)
     p.setAdditionalSearchPath(pybullet_data.getDataPath())
@@ -213,7 +231,8 @@ if __name__ == "__main__":
     friction = 0.0047
     randomize_val = 0.05
     planeId = p.loadURDF("plane.urdf", [0, 0, 0])
-    robotId = p.loadURDF("rlr_urdf.urdf", [0, 0, 0])
+    robotId_path = os.path.join("urdf and meshes/with smaller weight/rlr_urdf.urdf")
+    robotId = p.loadURDF(robotId_path, [0, 0, 0])
 
     # p.resetJointState(bodyUniqueId=robotId, jointIndex=2, targetValue=3.14)
     # p.setJointMotorControl2(bodyUniqueId=robotId, 
@@ -228,7 +247,8 @@ if __name__ == "__main__":
     p.setRealTimeSimulation(1)
 
     for e in range(episodes):
-        reset_joint(robotId, randomize_val=randomize_val, friction= friction)
+        # reset_joint(robotId, randomize_val=randomize_val, friction= friction)
+        reset_joint_swingup(robotId, randomize_val=randomize_val, friction= friction)
         state = get_state(robotId)
         episode_score = 0
         # state = np.array(p.getJointState(robotId, 1)[0], p.getJointState(robotId, 1)[1], p.getJointState(robotId, 2)[0], p.getJointState(robotId, 2)[1])
@@ -241,16 +261,17 @@ if __name__ == "__main__":
             prev_state = state.copy()
             state = get_state(robotId)
             # print(f"State: {state}")
-            if state[2] > 0.7 and state[2] < 5.58:
-                reward = 0
-                terminal = True
+            # if state[2] > 0.7 and state[2] < 5.58:
+            #     reward = 0
+            #     terminal = True
                 # print("Terminal due to joint 2")
-            elif state[0] > 3.14 or state[0] < -3.14:
+            if state[0] > 3.14 or state[0] < -3.14:
                 reward = -100
                 terminal = True
                 # print("Terminal due to joint 1")
             else:
-                reward = 1
+                # reward = 1
+                reward = math.cos(state[2]) - 0.002 * (state[3]) ** 2 + 0.001 * math.cos(state[0])
 
             if step > max_steps:
                 truncated = True
@@ -296,7 +317,7 @@ if __name__ == "__main__":
         if e % 50 == 0 and e > 1:
             print(f"Episode: {e}/{episodes}, Rolling mean: {int(np.mean(episode_scores[-50:]))}, Mean: {int(np.mean(episode_scores))}, Epsilon value: {eps}")
 
-        if e % 20 == 0 and e > 1:
+        if e % eval_interval == 0 and e > 1:
             eval_score = agent.eval(robotId=robotId, max_steps=max_steps, friction=friction)
             eval_scores.append(eval_score)
             # if len(eval_scores) > 2:
@@ -316,7 +337,7 @@ if __name__ == "__main__":
 
     plt.xlabel("Episode")
     plt.ylabel("Episode Score")
-    plt.title("DQN CartPole-v1 Evaluation Scores")
+    plt.title("DQN CartPole Episode Scores")
     plt.legend()  # Add a legend to the plot
     plt.show()
 

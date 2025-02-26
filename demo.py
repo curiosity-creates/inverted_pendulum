@@ -1,4 +1,4 @@
-from pybullet_inverted_pendulum import pybulletDQN, send_action, get_state, reset_joint
+from pybullet_inverted_pendulum import pybulletDQN, send_action, get_state, reset_joint, reset_joint_swingup
 import os
 import torch
 from itertools import count
@@ -9,7 +9,7 @@ import time
 if __name__ == "__main__":
     
     max_steps = 500
-    model_path = os.path.join("saved_models/run13", "model_5000.pth")
+    model_path = os.path.join("saved_models/run24", "model_8000.pth")
     if model_path:
         model = torch.load(model_path)
     
@@ -22,7 +22,8 @@ if __name__ == "__main__":
     randomize_val = 0.05
 
     planeId = p.loadURDF("plane.urdf", [0, 0, 0])
-    robotId = p.loadURDF("rlr_urdf.urdf", [0, 0, 0])
+    robotId_path = os.path.join("urdf and meshes/with smaller weight/rlr_urdf.urdf")
+    robotId = p.loadURDF(robotId_path, [0, 0, 0])
 
 
     base_pos, _ = p.getBasePositionAndOrientation(robotId)
@@ -36,7 +37,7 @@ if __name__ == "__main__":
 
     terminal = False
     truncated = False
-    logId = p.startStateLogging(p.STATE_LOGGING_VIDEO_MP4, "model_5000.mp4")
+    logId = p.startStateLogging(p.STATE_LOGGING_VIDEO_MP4, "test.mp4")
 
 
     while True:
