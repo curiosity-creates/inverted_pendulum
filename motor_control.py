@@ -1,3 +1,6 @@
+# Code used for hardware trial: Making the motor move, reading angle values from the encoders
+# Wire diagram is in the accompanying article
+
 import threading
 import time
 import numpy as np
@@ -5,8 +8,7 @@ import math
 import smbus2
 import motoron
 import matplotlib.pyplot as plt
-# Motor driver address
-# MOTOR_DRIVER_ADDR = 0x10
+
 
 class MeasurementThread(threading.Thread):
     def __init__(self, stop_event, bus_num = 1):
