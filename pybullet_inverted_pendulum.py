@@ -205,7 +205,7 @@ if __name__ == "__main__":
     # Create online and target models, input dimension is number of variables describing the state, output dimensions would number of actions possible.
     num_actions = 2
     num_states = 4
-    model_path = os.path.join("saved_models/run24", "model_5000.pth")
+    model_path = os.path.join("saved_models/run2_swingup", "model_8000.pth")
     if os.path.exists(model_path):                              # An existing model can be loaded if available
         print("Loading existing model")
         online_model = torch.load(model_path)

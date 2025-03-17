@@ -135,7 +135,7 @@ if __name__ == "__main__":
 
     max_steps = 500
     episode_score = 0
-    model_path = os.path.join("saved_models/run24", "model_8000.pth")
+    model_path = os.path.join("saved_models/run2_swingup", "model_8000.pth")
     if model_path:
         model = torch.load(model_path)
     
