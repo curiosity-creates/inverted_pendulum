@@ -1,8 +1,8 @@
 Link to the video:
-
+https://youtu.be/gjaC4GfFOQI
 
 Link to the article:
-
+https://medium.com/@curiositycreates91/dqn-algorithm-implementation-for-inverted-pendulum-from-simulation-to-physical-system-d57c01d0fb90
 
 Dependencies:
     Gymnasium
